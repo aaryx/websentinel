@@ -33,6 +33,89 @@ JSON / HTML reports.
 - Reports: Rich terminal, machine-readable JSON, standalone escaped HTML
 - Structured logging (`--verbose` / `--quiet`), meaningful exit codes
 
+## What a scan does
+
+WebSentinel makes bounded HTTP requests to the target and analyzes the responses
+it receives. By default it analyzes the starting page; `--crawl` optionally
+follows links on the same origin, subject to the configured depth and page
+limits. It does not execute JavaScript, submit forms, guess credentials, or
+send injection payloads.
+
+The built-in checks cover:
+
+| Check | What it inspects |
+| --- | --- |
+| Headers | Browser security controls such as CSP, HSTS, clickjacking protections, MIME sniffing, referrer policy, and cross-origin isolation headers |
+| Cookies | Whether response cookies set Secure, HttpOnly, and SameSite attributes, with context-sensitive interpretation |
+| TLS | Certificate validity dates and negotiated TLS version for HTTPS targets |
+| Methods | Methods advertised by the server through an OPTIONS response; advertisement is not treated as proof that a method is usable |
+| CORS | Cross-origin response headers and their apparent scope |
+| Information | Potentially revealing server and framework response headers |
+| Technology | Passive technology hints matched from response data |
+| HTML | Insecure form actions, mixed-content references, and third-party resources in returned HTML |
+| Robots and well-known files | Informational review of `robots.txt`, `sitemap.xml`, and `security.txt` |
+| URL inputs | Query parameter names are recorded as possible input surfaces; no values are attacked |
+
+Checks are evidence-based. A missing header or advertised method is not
+automatically a confirmed vulnerability. Findings include severity and
+confidence, and related findings are correlated without automatically raising
+anything to CRITICAL.
+
+## How it works
+
+1. The CLI validates and normalizes the target URL. Private and loopback
+   addresses are blocked unless `--allow-private` is supplied for a lab target.
+2. The async HTTP engine fetches the page and supporting endpoints with bounded
+   timeouts, redirect handling, response sizes, and configurable concurrency.
+3. Optional crawling stays on the target origin and respects discovered
+   `robots.txt` disallow rules and page/depth caps.
+4. Independent analyzers inspect responses and produce structured findings.
+5. Correlation combines related evidence, then a renderer emits terminal, JSON,
+   or standalone HTML output.
+
+## Configuration
+
+WebSentinel reads `websentinel.yaml` or `websentinel.yml` from the current
+directory by default. Pass `--config path/to/file.yaml` to select another file.
+Command-line options override file values when provided. The example config in
+this repository documents every supported setting:
+
+```yaml
+timeout: 10                 # seconds per request
+concurrency: 10             # maximum concurrent HTTP requests
+rate_limit: 0               # requests per second; 0 means unlimited
+max_pages: 50               # maximum pages for a crawl
+max_depth: 1                # maximum link depth for a crawl
+user_agent: "WebSentinel/1.0 (+authorized security assessment)"
+follow_redirects: true
+max_redirects: 5
+max_body_bytes: 1048576      # response body cap
+verify_tls: true
+output_format: terminal     # terminal, json, or html
+```
+
+Keep TLS verification enabled for normal assessments. `--no-verify-tls` is
+intended only for controlled lab situations with known certificate issues.
+`--proxy` can route requests through an authorized proxy.
+
+## Reports
+
+Terminal output summarizes the target, request count, pages, duration, and
+findings. JSON is suitable for automation and includes structured scan and
+finding data. HTML is a self-contained report that can be opened locally.
+Choose a format with `--format`, or use `-o` with a `.json` or `.html` filename
+to save a report:
+
+```bash
+websentinel scan -u https://example.com --format json
+websentinel scan -u https://example.com -o reports/example.html
+websentinel scan -u https://example.com --format json -o reports/example.json
+```
+
+The repository includes `sample_report.json` and `sample_report.html` as report
+examples. Treat reports as assessment data: review them before sharing, since
+they can contain hostnames, URLs, response evidence, and technology details.
+
 ## Installation
 
 ```bash
@@ -112,13 +195,37 @@ confidence and descriptions reflect that.
 
 ```
 websentinel/
-  cli.py scanning entry   scanner.py orchestration
-  http/client.py async engine      analyzers/*.py one module per check
-  crawler/crawler.py same-origin crawler
-  engine/correlation.py contextual priority
-  reporting/{terminal,json_report,html_report}.py
-  utils/{urls,logging,timing}.py
+  cli.py                      command-line interface and exit codes
+  scanner.py                  scan orchestration
+  config.py                   YAML configuration and defaults
+  models.py                   targets, responses, findings, and scan results
+  http/client.py               bounded asynchronous HTTP engine
+  analyzers/                   focused response analysis modules
+  crawler/crawler.py           capped same-origin crawler
+  engine/correlation.py        finding correlation and context
+  reporting/                   terminal, JSON, and HTML renderers
+  utils/                       URL validation, logging, and timing helpers
 ```
+
+The command is available as `websentinel` after installation, and can also be
+run as a Python module with `python -m websentinel`.
+
+## Development
+
+WebSentinel supports Python 3.11 and newer. To set up a local development
+environment and run the offline test suite:
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux:        source .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m pip install -e .
+pytest -q
+```
+
+Tests use mocked responses and do not require scanning a live website. To see
+the available analyzer names and descriptions, run `websentinel checks`.
 
 ## Testing
 
