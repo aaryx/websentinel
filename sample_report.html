@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>WebSentinel Report - 127.0.0.1</title><style>
+body{font-family:system-ui,sans-serif;margin:2rem auto;max-width:1000px;color:#1f2937}
+h1{border-bottom:3px solid #2563eb;padding-bottom:.3rem}
+.sev{display:inline-block;padding:.15rem .5rem;border-radius:4px;color:#fff;
+font-size:.8rem;font-weight:600}
+.finding{border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:.8rem 0}
+.finding h3{margin:.1rem 0}
+.evidence{background:#f3f4f6;padding:.5rem;border-radius:4px;overflow-wrap:anywhere;
+font-family:monospace;font-size:.85rem;white-space:pre-wrap}
+table{border-collapse:collapse}td,th{border:1px solid #e5e7eb;padding:.4rem .8rem}
+.dim{color:#6b7280;font-size:.85rem}
+</style></head><body>
+<h1>WebSentinel v1.0.0 — Security Report</h1>
+<p class="dim">Authorized-use scan. Observations are not confirmed
+vulnerabilities unless stated.</p>
+<table>
+<tr><th>Target</th><td>http://127.0.0.1:8099/</td></tr>
+<tr><th>Host</th><td>127.0.0.1:8099 (http)</td></tr>
+<tr><th>Scan started</th><td>2026-09-26T14:30:47.224102+00:00</td></tr>
+<tr><th>Duration</th><td>0.19s</td></tr>
+<tr><th>Requests</th><td>5</td></tr>
+<tr><th>Pages</th><td>1</td></tr>
+<tr><th>Technologies</th><td>jQuery</td></tr>
+</table>
+<h2>Summary</h2><table><tr><th>Severity</th><th>Count</th></tr>
+<tr><td><span class="sev" style="background:#7f1d1d">CRITICAL</span></td><td>0</td></tr>
+<tr><td><span class="sev" style="background:#dc2626">HIGH</span></td><td>1</td></tr>
+<tr><td><span class="sev" style="background:#d97706">MEDIUM</span></td><td>2</td></tr>
+<tr><td><span class="sev" style="background:#0891b2">LOW</span></td><td>4</td></tr>
+<tr><td><span class="sev" style="background:#6b7280">INFO</span></td><td>6</td></tr>
+</table><h2>Findings</h2>
+<div class="finding">
+<span class="sev" style="background:#dc2626">HIGH</span>
+<h3>Password form submits over plain HTTP <span class="dim">[HTML-INSECURE-FORM]</span></h3>
+<p class="dim">Category: HTML · Confidence: HIGH
+ · CWE: CWE-319
+ · OWASP: A02:2021 Cryptographic Failures</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>A form containing a password field posts to &#x27;http://127.0.0.1:8099/login&#x27; over unencrypted HTTP.</p>
+<p><b>Impact:</b> Credentials can be intercepted in transit.</p>
+<div class="evidence">&lt;form method=post action=http://127.0.0.1:8099/login&gt; with input[type=password]</div>
+<p><b>Remediation:</b> Serve and post the login form over HTTPS.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#d97706">MEDIUM</span>
+<h3>Site served over plain HTTP <span class="dim">[HTTP-PLAINTEXT]</span></h3>
+<p class="dim">Category: Transport · Confidence: HIGH
+ · CWE: CWE-319
+ · OWASP: A02:2021 Cryptographic Failures</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>Target is served over plain HTTP.</p>
+<p><b>Impact:</b> Traffic is unencrypted and modifiable in transit.</p>
+<div class="evidence">scheme=http; https probe status=0</div>
+<p><b>Remediation:</b> Serve the site over HTTPS and redirect HTTP-&gt;HTTPS.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#d97706">MEDIUM</span>
+<h3>Missing content-security-policy header <span class="dim">[HDR-CSP-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+ · CWE: CWE-693
+ · OWASP: A05:2021 Security Misconfiguration</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The content-security-policy header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no content-security-policy)</div>
+<p><b>Remediation:</b> Define a Content-Security-Policy to mitigate XSS and data injection.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#0891b2">LOW</span>
+<h3>Missing x-frame-options header <span class="dim">[HDR-XFO-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+ · CWE: CWE-1021
+ · OWASP: A05:2021 Security Misconfiguration</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The x-frame-options header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no x-frame-options)</div>
+<p><b>Remediation:</b> Set X-Frame-Options: DENY/SAMEORIGIN or CSP frame-ancestors.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#0891b2">LOW</span>
+<h3>Missing x-content-type-options header <span class="dim">[HDR-XCTO-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+ · CWE: CWE-693
+ · OWASP: A05:2021 Security Misconfiguration</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The x-content-type-options header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no x-content-type-options)</div>
+<p><b>Remediation:</b> Set X-Content-Type-Options: nosniff.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#0891b2">LOW</span>
+<h3>Missing referrer-policy header <span class="dim">[HDR-RP-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The referrer-policy header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no referrer-policy)</div>
+<p><b>Remediation:</b> Set Referrer-Policy (e.g. strict-origin-when-cross-origin).</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#0891b2">LOW</span>
+<h3>Information disclosure: server <span class="dim">[INFO-SERVER]</span></h3>
+<p class="dim">Category: Information Disclosure · Confidence: HIGH
+ · CWE: CWE-200
+ · OWASP: A05:2021 Security Misconfiguration</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>Header &#x27;server: SimpleHTTP/0.6 Python/3.11.0&#x27; reveals technology and exact version. Disclosure alone is not a vulnerability.</p>
+<p><b>Impact:</b> Aids attacker fingerprinting; versioned info enables targeted CVE lookups.</p>
+<div class="evidence">server: SimpleHTTP/0.6 Python/3.11.0</div>
+<p><b>Remediation:</b> Remove or genericize version-revealing headers.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#6b7280">INFO</span>
+<h3>Missing permissions-policy header <span class="dim">[HDR-PP-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The permissions-policy header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no permissions-policy)</div>
+<p><b>Remediation:</b> Consider a Permissions-Policy to restrict browser features.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#6b7280">INFO</span>
+<h3>Missing cross-origin-opener-policy header <span class="dim">[HDR-COOP-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The cross-origin-opener-policy header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no cross-origin-opener-policy)</div>
+<p><b>Remediation:</b> Consider Cross-Origin-Opener-Policy: same-origin.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#6b7280">INFO</span>
+<h3>Missing cross-origin-resource-policy header <span class="dim">[HDR-CORP-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The cross-origin-resource-policy header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no cross-origin-resource-policy)</div>
+<p><b>Remediation:</b> Consider Cross-Origin-Resource-Policy where appropriate.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#6b7280">INFO</span>
+<h3>Missing cross-origin-embedder-policy header <span class="dim">[HDR-COEP-MISSING]</span></h3>
+<p class="dim">Category: Security Headers · Confidence: HIGH
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/</p>
+<p>The cross-origin-embedder-policy header is not set on this response. This is a missing defense-in-depth control, not a confirmed vulnerability.</p>
+<p><b>Impact:</b> Reduced client-side protection.</p>
+<div class="evidence">GET http://127.0.0.1:8099/ -&gt; 200 (no cross-origin-embedder-policy)</div>
+<p><b>Remediation:</b> Consider Cross-Origin-Embedder-Policy where appropriate.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#6b7280">INFO</span>
+<h3>robots.txt discloses 2 disallowed paths <span class="dim">[RBTS-DISALLOW]</span></h3>
+<p class="dim">Category: Information Disclosure · Confidence: HIGH
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/robots.txt</p>
+<p>robots.txt lists paths hidden from crawlers. These are publicly visible and not vulnerabilities by themselves.</p>
+<p><b>Impact:</b> May point to admin or internal areas.</p>
+<div class="evidence">Disallow: /admin; Disallow: /backup</div>
+<p><b>Remediation:</b> Do not rely on robots.txt for access control.</p>
+</div>
+<div class="finding">
+<span class="sev" style="background:#6b7280">INFO</span>
+<h3>security.txt not found <span class="dim">[SEC-TXT-MISSING]</span></h3>
+<p class="dim">Category: Information Disclosure · Confidence: MEDIUM
+
+</p>
+<p><b>URL:</b> http://127.0.0.1:8099/.well-known/security.txt</p>
+<p>/.well-known/security.txt was not found.</p>
+<p><b>Impact:</b> Researchers lack a standard disclosure contact.</p>
+<div class="evidence">HTTP 404</div>
+<p><b>Remediation:</b> Publish a security.txt per RFC 9116.</p>
+</div>
+<h2>Pages discovered</h2><ul>
+<li>http://127.0.0.1:8099/</li>
+</ul>
+</body></html>
