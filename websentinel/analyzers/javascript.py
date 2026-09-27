@@ -54,7 +54,7 @@ def analyze_javascript(url: str, body: str) -> list[Finding]:
         findings.append(Finding(
             id="JS-SECRET", title=f"Possible {kind} in JavaScript",
             category="Information Disclosure", severity=Severity.HIGH,
-            confidence=conf, url=url,
+            confidence=conf, url=url, parameter=kind,
             description=f"A {kind}-shaped value appears in a public script. "
                         "If live, it grants account access; verify validity "
                         "manually (not tested).",

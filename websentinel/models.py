@@ -27,6 +27,7 @@ class Target:
     scheme: str
     host: str
     port: int
+    allow_private: bool = False
 
 
 @dataclass

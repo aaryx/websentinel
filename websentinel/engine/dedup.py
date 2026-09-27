@@ -7,8 +7,7 @@ from websentinel.models import Finding
 
 def _key(f: Finding) -> tuple:
     # Same check + same parameter = one finding; per-URL differences are
-    # merged into affected_urls. Evidence is intentionally NOT part of the
-    # key because it usually contains the URL itself.
+    # merged into affected_urls.
     return (f.id, f.parameter)
 
 
@@ -23,9 +22,11 @@ def deduplicate(findings: list[Finding]) -> list[Finding]:
         g = by_key[k]
         if f.url and f.url not in g.affected_urls:
             g.affected_urls.append(f.url)
+
     for g in by_key.values():
         if len(g.affected_urls) > 1:
-            g.description += (f" Affects {len(g.affected_urls)} URLs "
-                              "(see affected_urls).")
+            suffix = f" Affects {len(g.affected_urls)} URLs (see affected_urls)."
+            if "Affects " not in g.description:
+                g.description += suffix
             g.url = g.affected_urls[0]
     return list(by_key.values())

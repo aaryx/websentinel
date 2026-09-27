@@ -18,18 +18,34 @@ def _parse_cert_time(s: str) -> datetime:
         tzinfo=timezone.utc)
 
 
-def inspect_tls(target: Target, days_warn: int = _DAYS_WARN
-                ) -> tuple[list[Finding], dict]:
+def inspect_tls(
+    target: Target,
+    days_warn: int = _DAYS_WARN,
+    timeout: float = 10.0,
+    verify_tls: bool = True,
+) -> tuple[list[Finding], dict]:
     """Connect once, read negotiated TLS version and peer certificate."""
     findings: list[Finding] = []
     info: dict = {}
     if target.scheme != "https":
         return findings, info
-    ctx = ssl.create_default_context()
+
+    from websentinel.utils.urls import URLValidationError, validate_host_safety
+
     try:
-        with socket.create_connection((target.host, target.port),
-                                      timeout=10) as sock, \
-                ctx.wrap_socket(sock, server_hostname=target.host) as ssock:
+        validate_host_safety(target.host, allow_private=target.allow_private)
+    except URLValidationError as e:
+        info["error"] = str(e)
+        return findings, info
+
+    ctx = ssl.create_default_context()
+    if not verify_tls:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+    try:
+        with socket.create_connection((target.host, target.port), timeout=timeout) as sock, \
+                ctx.wrap_socket(sock, server_hostname=target.host if verify_tls else None) as ssock:
             info["tls_version"] = ssock.version()
             cert = ssock.getpeercert()
     except ssl.SSLCertVerificationError as e:

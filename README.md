@@ -125,7 +125,7 @@ Reports include findings, target and scan metadata, evidence, and remediation gu
 | --- | --- |
 | `0` | Scan completed without HIGH or CRITICAL findings |
 | `1` | Scan completed with HIGH or CRITICAL findings |
-| `2` | Invalid arguments or target |
+| `2` | Invalid arguments, invalid target, or configuration error |
 | `3` | Target/network error or interruption |
 | `4` | Internal error |
 
