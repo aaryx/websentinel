@@ -61,6 +61,10 @@ class Finding:
     parameter: str | None = None
     cwe: str | None = None
     owasp: str | None = None
+    method: str = "GET"
+    scanner_check: str = ""
+    tags: list[str] = field(default_factory=list)
+    affected_urls: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat())

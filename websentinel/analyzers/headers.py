@@ -74,18 +74,42 @@ def analyze_headers(resp: Response, is_https: bool) -> list[Finding]:
             evidence=f"GET {resp.final_url} -> {resp.status} (no {name})",
             remediation=remediation, cwe=cwe, owasp=owasp))
 
-    # Weak CSP observation (present but permissive)
+    # CSP value analysis (present but weak / incomplete)
     csp = h.get("content-security-policy", "")
-    if csp and ("unsafe-inline" in csp or "unsafe-eval" in csp or "* " in csp
-                or csp.strip().endswith("*")):
-        findings.append(Finding(
-            id="HDR-CSP-WEAK", title="Permissive Content-Security-Policy",
-            category="Security Headers", severity=Severity.LOW,
-            confidence=Confidence.MEDIUM, url=resp.final_url,
-            description="CSP contains permissive directives "
-                        "(unsafe-inline/unsafe-eval/wildcard).",
-            impact="Weakened XSS mitigation.",
-            evidence=csp[:300],
-            remediation="Remove unsafe-inline/unsafe-eval; avoid wildcards.",
-            cwe="CWE-693", owasp="A05:2021 Security Misconfiguration"))
+    if csp:
+        directives = {}
+        for part in csp.split(";"):
+            if part.strip():
+                bits = part.split()
+                directives[bits[0].lower()] = [b.lower() for b in bits[1:]]
+        issues: list[str] = []
+        script_src = directives.get("script-src",
+                                    directives.get("default-src", []))
+        bad = [v for v in ("'unsafe-inline'", "'unsafe-eval'", "*")
+               if v in script_src]
+        if bad:
+            issues.append(f"permissive script-src ({' '.join(bad)})")
+        if not directives.get("default-src"):
+            issues.append("missing default-src directive")
+        if "*" in directives.get("object-src", ["'none'"]) and \
+                "object-src" in directives:
+            issues.append("object-src allows any origin")
+        if "frame-ancestors" not in directives and "x-frame-options" not in h:
+            issues.append("no frame-ancestors (and no X-Frame-Options) — "
+                          "clickjacking protection relies on neither")
+        if issues:
+            sev = Severity.LOW
+            if "'unsafe-eval'" in str(script_src) or "*" in script_src:
+                sev = Severity.MEDIUM
+            findings.append(Finding(
+                id="HDR-CSP-WEAK", title="Weak or incomplete "
+                "Content-Security-Policy",
+                category="Security Headers", severity=sev,
+                confidence=Confidence.MEDIUM, url=resp.final_url,
+                description="; ".join(issues).capitalize() + ".",
+                impact="Reduced XSS / clickjacking mitigation strength.",
+                evidence=csp[:300],
+                remediation="Set default-src 'self'; use nonces/hashes instead "
+                            "of unsafe-inline; add frame-ancestors.",
+                cwe="CWE-693", owasp="A05:2021 Security Misconfiguration"))
     return findings

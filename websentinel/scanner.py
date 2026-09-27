@@ -20,21 +20,15 @@ from websentinel.analyzers import methods as methods_mod
 from websentinel.analyzers import robots as robots_mod
 from websentinel.analyzers import technology as tech_mod
 from websentinel.analyzers import tls as tls_mod
+from websentinel.analyzers import javascript as js_mod
+from websentinel.analyzers import injection as inj_mod
+from websentinel.checks import CHECKS as _REGISTRY
+from websentinel.core.scope import Scope
+from websentinel.engine.dedup import deduplicate
 
 log = logging.getLogger("websentinel.scan")
 
-CHECKS = [
-    ("headers",  "Security header analysis"),
-    ("cookies",  "Cookie attribute analysis"),
-    ("tls",      "TLS & certificate inspection (HTTPS only)"),
-    ("methods",  "HTTP method advertisement (OPTIONS)"),
-    ("cors",     "CORS configuration analysis"),
-    ("info",     "Information disclosure headers"),
-    ("tech",     "Passive technology fingerprinting"),
-    ("html",     "Passive HTML/form/mixed-content analysis"),
-    ("robots",   "robots.txt / sitemap.xml / security.txt"),
-    ("crawl",    "Controlled same-origin crawling (with --crawl)"),
-]
+CHECKS = [(c["id"], c["name"]) for c in _REGISTRY]
 
 
 async def scan(target: Target, cfg: Config, modules: set[str] | None = None,
@@ -42,7 +36,7 @@ async def scan(target: Target, cfg: Config, modules: set[str] | None = None,
     """Run the scan. `modules` limits analysis to the given check names."""
     result = ScanResult(target=target)
     start = time.monotonic()
-    all_modules = {c for c, _ in CHECKS}
+    all_modules = {c for c, _ in CHECKS} - {"injection", "crawl"}
     modules = modules or all_modules
 
     async with HttpEngine(cfg) as engine:
@@ -78,12 +72,13 @@ async def scan(target: Target, cfg: Config, modules: set[str] | None = None,
                 cwe="CWE-319", owasp="A02:2021 Cryptographic Failures"))
 
         # Crawl (optional) or analyze root page only
+        scope = Scope(target, cfg.scope)
         robots_paths: list[str] = []
         if not robots_r.error and robots_r.status == 200:
             robots_paths = robots_mod.robots_rules(robots_r.body)["disallow"]
         if crawl:
             crawler = Crawler(engine, target.url, cfg.max_depth,
-                              cfg.max_pages, robots_paths)
+                              cfg.max_pages, robots_paths, scope=scope)
             crawled = await crawler.crawl(target.url)
             result.responses.extend(r for r in crawled
                                     if r.final_url != root.final_url)
@@ -157,6 +152,47 @@ async def scan(target: Target, cfg: Config, modules: set[str] | None = None,
         if "tech" in modules:
             result.technologies = tech_mod.detect_technologies(result.responses)
 
+        # Static JavaScript analysis (bounded, same-scope scripts only)
+        if "js" in modules:
+            js_urls: list[str] = []
+            for resp in result.responses:
+                js_urls.extend(js_mod.script_urls(resp, scope))
+            for jurl in sorted(set(js_urls))[:10]:  # ponytail: cap 10 scripts
+                jsr = await engine.fetch(jurl)
+                if jsr.error or len(jsr.body) > cfg.max_body_bytes:
+                    continue
+                result.findings.extend(js_mod.analyze_javascript(
+                    jsr.final_url, jsr.body))
+                eps = js_mod.extract_js_endpoints(jsr.body)
+                if eps:
+                    result.findings.append(Finding(
+                        id="JS-ENDPOINTS",
+                        title=f"JavaScript references {len(eps)} API-like paths",
+                        category="API Discovery", severity=Severity.INFO,
+                        confidence=Confidence.MEDIUM, url=jsr.final_url,
+                        description="Endpoint strings found in JavaScript. "
+                                    "Discovered endpoints are NOT tested.",
+                        impact="Reveals API surface.",
+                        evidence="; ".join(eps[:10]),
+                        remediation="Review exposure of undocumented endpoints."))
+                result.requests_made = engine.requests_made
+
+        # Reflection canary (strictly budgeted; only when explicitly enabled)
+        if "injection" in modules:
+            from websentinel.utils.urls import extract_params as _ep
+            probes = 0
+            for page in result.pages:
+                params = _ep(page)
+                if not params or probes >= 10:
+                    continue
+                pr = await engine.fetch(inj_mod.build_probe(page, params))
+                probes += 1
+                if not pr.error:
+                    f = inj_mod.evaluate_probe(page, pr.final_url, pr.body)
+                    if f:
+                        result.findings.append(f)
+            result.requests_made = engine.requests_made
+
         # Passive input observation (no payloads)
         from websentinel.utils.urls import extract_params
         for page in result.pages:
@@ -176,5 +212,6 @@ async def scan(target: Target, cfg: Config, modules: set[str] | None = None,
 
     result.findings = correlate(result.findings,
                                 is_https=target.scheme == "https")
+    result.findings = deduplicate(result.findings)
     result.duration_s = time.monotonic() - start
     return result

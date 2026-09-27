@@ -6,6 +6,11 @@ from http.cookies import SimpleCookie
 from websentinel.models import Finding, Severity, Confidence, Response
 
 
+def sessionish_cookie(name: str) -> bool:
+    return any(k in name.lower()
+               for k in ("sess", "auth", "token", "jwt", "login", "sid"))
+
+
 def _mk(fid, title, sev, conf, url, cookie, desc, impact, remediation,
         cwe=None, owasp=None):
     return Finding(id=fid, title=title, category="Cookies", severity=sev,
@@ -37,8 +42,7 @@ def analyze_cookies(resp: Response, is_https: bool) -> list[Finding]:
                     "Cookie may be exposed to network eavesdropping.",
                     "Add the Secure attribute.",
                     "CWE-614", "A05:2021 Security Misconfiguration"))
-            sessionish = any(k in name.lower() for k in
-                             ("sess", "auth", "token", "jwt", "login", "sid"))
+            sessionish = sessionish_cookie(name)
             if sessionish and not has("httponly"):
                 findings.append(_mk(
                     "CK-NO-HTTPONLY",                     f"Cookie '{name}' missing HttpOnly",
@@ -48,7 +52,18 @@ def analyze_cookies(resp: Response, is_https: bool) -> list[Finding]:
                     "Readable by JavaScript via document.cookie.",
                     "Add HttpOnly unless client-side JS needs the cookie.",
                     "CWE-1004", "A05:2021 Security Misconfiguration"))
-            if not has("samesite"):
+            samesite_none = "samesite=none" in lower.replace(" ", "")
+            if samesite_none and not has("secure"):
+                findings.append(_mk(
+                    "CK-SAMESITE-NONE-INSECURE",
+                    f"Cookie '{name}': SameSite=None without Secure",
+                    Severity.MEDIUM, Confidence.HIGH, resp.final_url, name,
+                    "SameSite=None without Secure is rejected by modern "
+                    "browsers and indicates misconfiguration.",
+                    "Cookie may silently fail or be sent cross-site insecurely.",
+                    "Add Secure when using SameSite=None.",
+                    "CWE-614", "A05:2021 Security Misconfiguration"))
+            elif not has("samesite"):
                 findings.append(_mk(
                     "CK-NO-SAMESITE", f"Cookie '{name}' missing SameSite",
                     Severity.LOW, Confidence.MEDIUM, resp.final_url, name,
@@ -57,6 +72,7 @@ def analyze_cookies(resp: Response, is_https: bool) -> list[Finding]:
                     "Set SameSite=Lax or Strict (or None + Secure if cross-site "
                     "use is required).",
                     "CWE-1275", "A01:2021 Broken Access Control"))
+
             domain = morsel["domain"]
             if domain.startswith(".") or (
                     domain and domain.count(".") <= 1 and

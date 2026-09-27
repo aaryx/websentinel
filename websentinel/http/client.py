@@ -22,15 +22,20 @@ class HttpEngine:
         self._rl = RateLimiter(config.rate_limit)
         limits = httpx.Limits(max_connections=config.concurrency,
                               max_keepalive_connections=config.concurrency)
+        headers = {"User-Agent": config.user_agent, **config.extra_headers}
         self._client = httpx.AsyncClient(
             limits=limits,
             timeout=httpx.Timeout(config.timeout),
             verify=config.verify_tls,
             proxy=config.proxy,
-            headers={"User-Agent": config.user_agent},
+            headers=headers,
             follow_redirects=False,  # handled manually to cap chain
         )
         self.requests_made = 0
+
+    @property
+    def _over_budget(self) -> bool:
+        return self.requests_made >= self.config.max_requests
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -46,28 +51,38 @@ class HttpEngine:
         """Fetch a URL safely; never raises for network errors."""
         async with self._sem:
             await self._rl.wait()
+            if self._over_budget:
+                return self._err(url, time.monotonic(),
+                                 f"request budget ({self.config.max_requests}) exhausted")
             chain: list[str] = []
             current = url
             start = time.monotonic()
             try:
-                for _ in range(self.config.max_redirects + 1):
-                    r = await self._client.request(
-                        method, current, headers=headers,
-                        follow_redirects=False)
-                    self.requests_made += 1
-                    if r.is_redirect and self.config.follow_redirects \
-                            and "location" in r.headers:
-                        chain.append(str(r.url))
-                        current = str(r.url.join(r.headers["location"]))
-                        continue
-                    return await self._to_response(r, start, chain)
-                return Response(url=url, final_url=current, status=0,
-                                headers={}, set_cookies=[], body="",
-                                content_type="", content_length=0,
-                                elapsed_ms=elapsed_ms(start),
-                                http_version="",
-                                redirect_chain=chain,
-                                error="redirect loop / too many redirects")
+                for attempt in range(self.config.retries + 2):
+                    try:
+                        for _ in range(self.config.max_redirects + 1):
+                            r = await self._client.request(
+                                method, current, headers=headers,
+                                follow_redirects=False)
+                            self.requests_made += 1
+                            if r.is_redirect and self.config.follow_redirects \
+                                    and "location" in r.headers:
+                                chain.append(str(r.url))
+                                current = str(r.url.join(
+                                    r.headers["location"]))
+                                continue
+                            return await self._to_response(r, start, chain)
+                        return Response(
+                            url=url, final_url=current, status=0, headers={},
+                            set_cookies=[], body="", content_type="",
+                            content_length=0, elapsed_ms=elapsed_ms(start),
+                            http_version="", redirect_chain=chain,
+                            error="redirect loop / too many redirects")
+                    except (httpx.ConnectError, httpx.ReadTimeout):
+                        if attempt > self.config.retries:
+                            raise
+                        await asyncio.sleep(0.25 * (attempt + 1))
+                return self._err(url, start, "retry budget exhausted")
             except httpx.TimeoutException:
                 return self._err(url, start, "connection/Read timeout")
             except httpx.ConnectError as e:

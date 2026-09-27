@@ -29,11 +29,20 @@ def test_weak_csp_detected():
     assert "HDR-CSP-WEAK" in {x.id for x in f}
 
 
+def test_strong_csp_not_flagged():
+    f = analyze_headers(make_response(headers={
+        "Content-Security-Policy":
+            "default-src 'self'; frame-ancestors 'none'"}),
+        is_https=True)
+    assert "HDR-CSP-WEAK" not in {x.id for x in f}
+
+
 def test_all_present_no_missing_findings():
     hdrs = {n: "x" for n in (
-        "content-security-policy", "strict-transport-security",
-        "x-frame-options", "x-content-type-options", "referrer-policy",
+        "strict-transport-security", "x-frame-options",
+        "x-content-type-options", "referrer-policy",
         "permissions-policy", "cross-origin-opener-policy",
         "cross-origin-resource-policy", "cross-origin-embedder-policy")}
+    hdrs["content-security-policy"] = "default-src 'self'"
     f = analyze_headers(make_response(headers=hdrs), is_https=True)
     assert not f

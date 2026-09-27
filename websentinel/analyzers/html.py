@@ -21,8 +21,25 @@ def analyze_html(resp: Response, page_is_https: bool) -> list[Finding]:
         action = form.get("action") or url
         action = urljoin(url, action)
         method = (form.get("method") or "get").lower()
-        has_password = any(i.get("type") == "password"
-                           for i in form.find_all("input"))
+        inputs = form.find_all("input")
+        has_password = any(i.get("type") == "password" for i in inputs)
+        names = {str(i.get("name", "")).lower() for i in inputs}
+        if method == "post" and not any(
+                "csrf" in n or "token" in n for n in names):
+            findings.append(Finding(
+                id="HTML-CSRF-MAYBE",
+                title="Potential CSRF protection missing on form",
+                category="HTML", severity=Severity.LOW,
+                confidence=Confidence.LOW, url=url,
+                description=f"A POST form at '{action}' contains no obvious "
+                            "CSRF token field. Tokens may instead be sent via "
+                            "headers/meta, so this is a potential weakness, "
+                            "not a confirmed CSRF vulnerability.",
+                impact="If unprotected, cross-site request forgery is possible.",
+                evidence=f"<form method=post action={action}> inputs={sorted(names)}",
+                remediation="Verify anti-CSRF tokens (or SameSite cookies + "
+                            "Origin checks) protect state-changing forms.",
+                cwe="CWE-352", owasp="A01:2021 Broken Access Control"))
         scheme = urlsplit(action).scheme
         if has_password and scheme == "http":
             findings.append(Finding(

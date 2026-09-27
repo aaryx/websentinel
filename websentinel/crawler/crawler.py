@@ -16,12 +16,15 @@ log = logging.getLogger("websentinel.crawler")
 class Crawler:
     def __init__(self, engine: HttpEngine, origin: str,
                  max_depth: int = 1, max_pages: int = 50,
-                 robots_disallow: list[str] | None = None) -> None:
+                 robots_disallow: list[str] | None = None,
+                 scope=None) -> None:
         self.engine = engine
         self.origin = origin
         self.max_depth = max_depth
         self.max_pages = max_pages
         self.disallow = robots_disallow or []
+        self.scope = scope
+        self.skipped_out_of_scope = 0
         self.seen: set[str] = set()
 
     def _blocked_by_robots(self, url: str) -> bool:
@@ -50,8 +53,12 @@ class Crawler:
                     continue
                 for link in extract_links(resp):
                     n = normalize_url(link)
-                    if n in self.seen or not same_origin(link, self.origin) \
+                    in_scope = self.scope.allows(n) if self.scope \
+                        else same_origin(link, self.origin)
+                    if n in self.seen or not in_scope \
                             or self._blocked_by_robots(n):
+                        if n not in self.seen and not in_scope:
+                            self.skipped_out_of_scope += 1
                         continue
                     self.seen.add(n)
                     queue.append((n, depth + 1))

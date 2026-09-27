@@ -1,7 +1,7 @@
 """Configuration loading with safe defaults."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -21,17 +21,28 @@ class Config:
     verify_tls: bool = True
     output_format: str = "terminal"
     proxy: str | None = None
+    retries: int = 1
+    max_requests: int = 500           # hard request budget
+    scope: str = "same-origin"        # same-origin | subdomains
+    extra_headers: dict = field(default_factory=dict)  # redacted from logs
 
     @classmethod
     def load(cls, path: str | None) -> "Config":
         cfg = cls()
-        candidates = [Path(path)] if path else [Path("websentinel.yaml"),
-                                                Path("websentinel.yml")]
+        candidates = ([Path(path)] if path else
+                      [Path(".websentinel.yml"), Path("websentinel.yaml"),
+                       Path("websentinel.yml")])
+        data = None
         for p in candidates:
             if p.is_file():
                 data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-                for k, v in data.items():
-                    if hasattr(cfg, k):
-                        setattr(cfg, k, v)
                 break
+        if data:
+            flat = dict(data.get("scan", data))  # support flat or nested
+            for k, v in flat.items():
+                if hasattr(cfg, k):
+                    setattr(cfg, k, v)
+            cfg.scope = data.get("scope", {}).get("mode", cfg.scope) \
+                if isinstance(data.get("scope"), dict) else flat.get(
+                    "scope", cfg.scope)
         return cfg
