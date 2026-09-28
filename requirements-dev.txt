@@ -6,4 +6,4 @@ hypothesis>=6.100
 trustme>=1.2
 jsonschema>=4.23
 pip-audit>=2.9
-ruff>=0.11
+ruff>=0.16.9
