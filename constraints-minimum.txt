@@ -1,5 +1,5 @@
 # Minimum direct runtime versions, exercised separately from latest dependencies.
 httpx==0.27.0
 beautifulsoup4==4.12.0
-rich==13.0.0
+rich==15.0.0
 PyYAML==6.0
