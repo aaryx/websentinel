@@ -32,7 +32,7 @@ jobs:
       - run: python -m pip check
       - run: python -m ruff check websentinel tests scripts
       - run: python -m pytest -q -m "not online" --cov=websentinel --cov-branch --cov-fail-under=90 --cov-report=term-missing --cov-report=xml --junitxml=test-results.xml
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: test-evidence-${{ matrix.os }}-${{ matrix.python }}
@@ -82,7 +82,7 @@ jobs:
       - run: python -m pip install dist/*.whl
       - run: python scripts/release_smoke.py
       - run: python scripts/release_manifest.py dist
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheel
           path: dist/*
@@ -100,7 +100,7 @@ jobs:
           python-version: '3.14'
       - run: python -m pip install .
       - run: python scripts/endurance.py --seconds 300 --output evidence/endurance.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: endurance
           path: evidence/endurance.json
