@@ -4,7 +4,7 @@ from __future__ import annotations
 from urllib.parse import urlsplit
 
 from websentinel.models import Target
-from websentinel.utils.urls import is_safe_ip, parse_ip_literal
+from websentinel.utils.urls import is_safe_ip, parse_ip_literal, canonical_host
 
 
 class Scope:
@@ -21,7 +21,7 @@ class Scope:
         self.target = target
         self.mode = mode
         self.scheme = target.scheme.lower()
-        self.host = target.host.lower()
+        self.host = canonical_host(target.host)
         self.port = target.port
         self.allow_private = allow_private
         self.is_ip_host = parse_ip_literal(self.host) is not None
@@ -48,18 +48,22 @@ class Scope:
 
     def allows(self, url: str) -> bool:
         """Check whether a URL is strictly within the allowed scan scope."""
-        p = urlsplit(url)
+        try:
+            p = urlsplit(url)
+            host = canonical_host(p.hostname) if p.hostname else ""
+            port = p.port if p.port is not None else (443 if p.scheme == "https" else 80)
+        except ValueError:
+            return False
+        if p.username is not None or p.password is not None or not 1 <= port <= 65535:
+            return False
         if p.scheme not in ("http", "https"):
             return False
 
-        host = (p.hostname or "").lower()
         if not host:
             return False
 
         if not self._is_safe_destination(host):
             return False
-
-        port = p.port or (443 if p.scheme == "https" else 80)
 
         if self.mode == "same-origin":
             return (p.scheme, host, port) == (self.scheme, self.host, self.port)
@@ -86,18 +90,22 @@ class Scope:
 
         Permits in-scope URLs as well as canonical HTTP -> HTTPS upgrade on the same host.
         """
-        p = urlsplit(url)
+        try:
+            p = urlsplit(url)
+            host = canonical_host(p.hostname) if p.hostname else ""
+            port = p.port if p.port is not None else (443 if p.scheme == "https" else 80)
+        except ValueError:
+            return False
+        if p.username is not None or p.password is not None or not 1 <= port <= 65535:
+            return False
         if p.scheme not in ("http", "https"):
             return False
 
-        host = (p.hostname or "").lower()
         if not host:
             return False
 
         if not self._is_safe_destination(host):
             return False
-
-        port = p.port or (443 if p.scheme == "https" else 80)
 
         # Direct in-scope
         if self.allows(url):

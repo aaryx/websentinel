@@ -45,6 +45,7 @@ class Response:
     http_version: str
     redirect_chain: list[str] = field(default_factory=list)
     error: str | None = None
+    truncated: bool = False
 
 
 @dataclass
@@ -90,6 +91,15 @@ class ScanResult:
         default_factory=lambda: datetime.now(timezone.utc).isoformat())
     duration_s: float = 0.0
     requests_made: int = 0
+    check_status: dict[str, dict] = field(default_factory=dict)
+    redaction_values: list[str] = field(default_factory=list, repr=False)
+
+    @property
+    def completion(self) -> str:
+        if self.errors:
+            return "failed"
+        return "partial" if any(v["status"] in ("partial", "failed", "skipped", "pending")
+                                for v in self.check_status.values()) else "complete"
 
     def summary(self) -> dict[str, int]:
         counts = {s.value: 0 for s in Severity}

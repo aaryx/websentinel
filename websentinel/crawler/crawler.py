@@ -22,6 +22,7 @@ class Crawler:
         max_pages: int = 50,
         robots_disallow: list[str] | None = None,
         scope=None,
+        robots=None,
     ) -> None:
         self.engine = engine
         self.origin = origin
@@ -29,6 +30,7 @@ class Crawler:
         self.max_pages = max_pages
         self.disallow = robots_disallow or []
         self.scope = scope
+        self.robots = robots
         self.skipped_out_of_scope = 0
         self.seen: set[str] = set()
 
@@ -36,11 +38,25 @@ class Crawler:
         from urllib.parse import urlsplit
 
         path = urlsplit(url).path
-        return (
-            any(d != "/" and path.startswith(d) for d in self.disallow if d != "/")
-            if self.disallow
-            else False
-        )
+        if self.robots is not None:
+            return not self.robots.can_fetch(self.engine.config.user_agent, url)
+        return any(path.startswith(d) for d in self.disallow if d)
+
+    def _enqueue_links(self, resp, depth, queue, results_count):
+        for link in extract_links(resp):
+            if results_count + len(queue) >= self.max_pages:
+                break
+            try:
+                in_scope = self.scope.allows(link) if self.scope else same_origin(link, self.origin)
+                n = normalize_url(link)
+            except ValueError:
+                continue
+            if n in self.seen or not in_scope or self._blocked_by_robots(n):
+                if n not in self.seen and not in_scope:
+                    self.skipped_out_of_scope += 1
+                continue
+            self.seen.add(n)
+            queue.append((n, depth))
 
     async def crawl(
         self, start_url: str, initial_response: Response | None = None
@@ -53,19 +69,7 @@ class Crawler:
             results.append(initial_response)
             self.seen.add(normalize_url(initial_response.final_url))
             if not initial_response.error and self.max_depth > 0:
-                for link in extract_links(initial_response):
-                    n = normalize_url(link)
-                    in_scope = (
-                        self.scope.allows(n)
-                        if self.scope
-                        else same_origin(link, self.origin)
-                    )
-                    if n in self.seen or not in_scope or self._blocked_by_robots(n):
-                        if n not in self.seen and not in_scope:
-                            self.skipped_out_of_scope += 1
-                        continue
-                    self.seen.add(n)
-                    queue.append((n, 1))
+                self._enqueue_links(initial_response, 1, queue, len(results))
         else:
             queue.append((start_url, 0))
 
@@ -82,21 +86,10 @@ class Crawler:
             responses = await asyncio.gather(
                 *(self.engine.fetch(u) for u, _ in batch)
             )
+            results.extend(responses)
             for (u, depth), resp in zip(batch, responses):
-                results.append(resp)
+                self.seen.add(normalize_url(resp.final_url))
                 if resp.error or depth >= self.max_depth:
                     continue
-                for link in extract_links(resp):
-                    n = normalize_url(link)
-                    in_scope = (
-                        self.scope.allows(n)
-                        if self.scope
-                        else same_origin(link, self.origin)
-                    )
-                    if n in self.seen or not in_scope or self._blocked_by_robots(n):
-                        if n not in self.seen and not in_scope:
-                            self.skipped_out_of_scope += 1
-                        continue
-                    self.seen.add(n)
-                    queue.append((n, depth + 1))
+                self._enqueue_links(resp, depth + 1, queue, len(results))
         return results

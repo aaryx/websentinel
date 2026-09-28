@@ -5,6 +5,7 @@ import json
 
 from websentinel import __version__
 from websentinel.models import ScanResult, Severity
+from websentinel.utils.redaction import safe_report
 
 _LEVEL = {
     Severity.CRITICAL: "error",
@@ -15,6 +16,7 @@ _LEVEL = {
 }
 
 
+@safe_report
 def render_sarif(result: ScanResult) -> str:
     seen: dict[str, dict] = {}
     for f in result.findings:
@@ -73,6 +75,15 @@ def render_sarif(result: ScanResult) -> str:
                     }
                 },
                 "results": results,
+                "invocations": [{
+                    "executionSuccessful": result.completion == "complete",
+                    "properties": {"completion": result.completion, "checks": result.check_status},
+                    "toolExecutionNotifications": [
+                        {"level": level, "message": {"text": message}}
+                        for level, messages in (("error", result.errors), ("warning", result.warnings))
+                        for message in messages
+                    ],
+                }],
             }
         ],
     }

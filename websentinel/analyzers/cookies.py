@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from http.cookies import SimpleCookie
+import re
+from urllib.parse import urlsplit
 
 from websentinel.models import Confidence, Finding, Response, Severity
 
@@ -52,12 +54,26 @@ def analyze_cookies(resp: Response, is_https: bool) -> list[Finding]:
         for morsel in cookie.values():
             name = morsel.key
             kv = {k.lower() for k in morsel.keys() if morsel[k]}
-            lower = raw.lower()
-            has = lambda a: a in kv or a in lower
+            has = lambda a: a in kv
 
             # Sanitized attribute summary without leaking raw secret value
             attrs = [f"{k}={morsel[k]}" for k in morsel.keys() if morsel[k]]
             safe_evidence = f"Set-Cookie: {name}=[REDACTED]" + (f"; {'; '.join(attrs)}" if attrs else "")
+
+            invalid = []
+            if re.search(r";\s*samesite\s*=", raw, re.I) and morsel["samesite"].lower() not in ("lax", "strict", "none"):
+                invalid.append("unrecognized SameSite value")
+            if name.startswith(("__Secure-", "__Host-", "__Http-")) and (not is_https or not has("secure")):
+                invalid.append("cookie prefix requires HTTPS and Secure")
+            if name.startswith("__Host-") and (morsel["domain"] or morsel["path"] != "/"):
+                invalid.append("__Host- prefix requires Path=/ and no Domain")
+            if name.startswith(("__Http-", "__Host-Http-")) and not has("httponly"):
+                invalid.append("HTTP cookie prefix requires HttpOnly")
+            if invalid:
+                findings.append(_mk("CK-INVALID-ATTR", f"Cookie '{name}' has invalid attributes",
+                    Severity.LOW, Confidence.HIGH, resp.final_url, name, "; ".join(invalid),
+                    "Browsers may reject the cookie or apply unintended defaults.",
+                    "Use valid SameSite and cookie-prefix attributes.", safe_evidence, "CWE-614"))
 
             sessionish = sessionish_cookie(name)
             if is_https and not has("secure"):
@@ -102,7 +118,7 @@ def analyze_cookies(resp: Response, is_https: bool) -> list[Finding]:
                     )
                 )
 
-            samesite_none = "samesite=none" in lower.replace(" ", "")
+            samesite_none = morsel["samesite"].lower() == "none"
             if samesite_none and not has("secure"):
                 findings.append(
                     _mk(
@@ -143,11 +159,9 @@ def analyze_cookies(resp: Response, is_https: bool) -> list[Finding]:
 
             domain = morsel["domain"]
             if domain:
-                target_host = resp.final_url.split("/")[2].split(":")[0].lower()
+                target_host = (urlsplit(resp.final_url).hostname or "").lower()
                 clean_domain = domain.lstrip(".").lower()
-                if domain.startswith(".") or (
-                    domain.count(".") <= 1 and not target_host.endswith(clean_domain)
-                ):
+                if target_host.endswith("." + clean_domain):
                     findings.append(
                         _mk(
                             "CK-BROAD-DOMAIN",

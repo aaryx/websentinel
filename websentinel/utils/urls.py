@@ -2,16 +2,25 @@
 from __future__ import annotations
 
 import ipaddress
-import posixpath
 import re
 import socket
-from urllib.parse import urlsplit, urlunsplit, quote, unquote
+import httpx
+from urllib.parse import urlsplit, urlunsplit, urljoin, quote, parse_qsl, unquote_plus
 
 from websentinel.models import Target
 
 
 class URLValidationError(ValueError):
     pass
+
+
+def canonical_host(host: str) -> str:
+    """Use the HTTP client's IDNA implementation at every scope boundary."""
+    try:
+        authority = f"[{host}]" if ":" in host else host
+        return httpx.URL(f"https://{authority}/").raw_host.decode("ascii").lower()
+    except (httpx.InvalidURL, UnicodeError, ValueError) as exc:
+        raise URLValidationError("Invalid host") from exc
 
 
 RESERVED_PRIVATE_DOMAINS = (
@@ -91,7 +100,7 @@ def is_safe_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def validate_host_safety(host: str, allow_private: bool = False) -> None:
+def validate_host_safety(host: str, allow_private: bool = False, *, resolve_dns: bool = True) -> None:
     """Ensure host does not point to private, loopback, or non-public addresses."""
     if allow_private:
         return
@@ -121,6 +130,8 @@ def validate_host_safety(host: str, allow_private: bool = False) -> None:
             "to scan lab/internal targets"
         )
 
+    if not resolve_dns:
+        return
     # Attempt DNS resolution to detect rebinding/aliases to private IPs
     try:
         results = socket.getaddrinfo(clean_host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -139,46 +150,70 @@ def validate_host_safety(host: str, allow_private: bool = False) -> None:
         pass
 
 
-def sanitize_url_for_logging(url: str) -> str:
+def sanitize_url_for_logging(url: str, *, redact_query: bool = True) -> str:
     """Mask credentials in URL for safe logging and reporting."""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return "[INVALID URL]"
+    if redact_query:
+        from websentinel.utils.redaction import _SENSITIVE
+        query = "&".join(part.partition("=")[0] + "=[REDACTED]"
+                         if _SENSITIVE.search(unquote_plus(part.partition("=")[0])) else part
+                         for part in parts.query.split("&"))
+        parts = parts._replace(query=query)
     if parts.username or parts.password:
         user = parts.username or ""
-        netloc = f"{user}:[REDACTED]@{parts.hostname}" if parts.hostname else "[REDACTED]"
-        if parts.port:
-            netloc += f":{parts.port}"
+        host = parts.hostname or ""
+        host = f"[{host}]" if ":" in host else host
+        netloc = f"{user}:[REDACTED]@{host}"
+        if port is not None:
+            netloc += f":{port}"
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    return url
+    return urlunsplit(parts)
 
 
-def normalize_target(raw: str, allow_private: bool = False) -> Target:
+def resolve_connection_address(host: str, allow_private: bool = False) -> str:
+    """Resolve once and validate the exact address used for the connection."""
+    validate_host_safety(host, allow_private=allow_private)
+    addresses = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    if not addresses:
+        raise URLValidationError("Host has no addresses")
+    if not allow_private and any(not is_safe_ip(ipaddress.ip_address(a[4][0])) for a in addresses):
+        raise URLValidationError("DNS resolved to a non-public address")
+    return addresses[0][4][0]
+
+
+def normalize_target(raw: str, allow_private: bool = False, *, resolve_dns: bool = True) -> Target:
     """Validate and normalize a user-supplied target URL."""
     raw = raw.strip()
     if not raw:
         raise URLValidationError("Empty target URL")
     if "://" not in raw:
         raw = "https://" + raw
-    parts = urlsplit(raw)
+    if any(ord(c) < 32 or ord(c) == 127 for c in raw):
+        raise URLValidationError("Control characters are not allowed in target URLs")
+    try:
+        parts = urlsplit(raw)
+    except ValueError as e:
+        raise URLValidationError("Malformed target URL") from e
     if parts.scheme not in ("http", "https"):
         raise URLValidationError(f"Unsupported scheme: {parts.scheme!r}")
     if not parts.hostname:
         raise URLValidationError("Missing host")
 
     host = parts.hostname
-    # IDNA for internationalized domains
-    try:
-        host = host.encode("idna").decode("ascii")
-    except UnicodeError as e:
-        raise URLValidationError(f"Invalid host: {e}") from e
+    host = canonical_host(host)
 
     try:
-        port = parts.port or (443 if parts.scheme == "https" else 80)
+        port = parts.port if parts.port is not None else (443 if parts.scheme == "https" else 80)
     except ValueError as e:
         raise URLValidationError("Invalid port") from e
     if not (1 <= port <= 65535):
         raise URLValidationError(f"Invalid port: {port}")
 
-    validate_host_safety(host, allow_private=allow_private)
+    validate_host_safety(host, allow_private=allow_private, resolve_dns=resolve_dns)
 
     path = parts.path or "/"
     # Never preserve credentials in normalized target URL
@@ -193,7 +228,7 @@ def normalize_target(raw: str, allow_private: bool = False) -> Target:
     )
     url = urlunsplit((parts.scheme, netloc, path, parts.query, ""))  # fragments dropped
     return Target(
-        original=raw,
+        original=sanitize_url_for_logging(raw),
         url=url,
         scheme=parts.scheme,
         host=host,
@@ -207,37 +242,55 @@ def normalize_url(url: str) -> str:
     normalize path dot-segments, strip default ports, strip credentials."""
     parts = urlsplit(url)
     scheme = parts.scheme.lower()
-    host = (parts.hostname or "").lower()
+    host = canonical_host(parts.hostname) if parts.hostname else ""
     try:
         port = parts.port
-    except ValueError:
-        port = None
+    except ValueError as e:
+        raise URLValidationError("Invalid port") from e
     default = 443 if scheme == "https" else 80
     netloc = f"[{host}]" if ":" in host else host
     if port and port != default:
         netloc = f"{netloc}:{port}"
-    path = quote(unquote(parts.path or "/"), safe="/%:@!$&'()*+,;=-._~")
-    path = posixpath.normpath(path)
-    if parts.path.endswith("/") and not path.endswith("/"):
+    path = quote(parts.path or "/", safe="/%:@!$&'()*+,;=-._~")
+    segments = []
+    for segment in path.split("/"):
+        if segment == "..":
+            if len(segments) > 1:
+                segments.pop()
+        elif segment != ".":
+            segments.append(segment)
+    path = "/".join(segments)
+    if parts.path.endswith(("/", "/.", "/..")) and not path.endswith("/"):
         path += "/"
     if not path.startswith("/"):
         path = "/" + path
     return urlunsplit((scheme, netloc, path, parts.query, ""))
 
 
+def resolve_url(base: str, reference: str) -> str:
+    """Resolve untrusted HTML references; ignore malformed/non-web URLs."""
+    try:
+        full = urljoin(base, reference.strip())
+        p = urlsplit(full)
+        if (p.scheme not in ("http", "https") or not p.hostname
+                or p.username is not None or p.password is not None
+                or p.port == 0):
+            return ""
+        return full
+    except (ValueError, AttributeError, TypeError):
+        return ""
+
+
 def same_origin(a: str, b: str) -> bool:
     pa, pb = urlsplit(a), urlsplit(b)
     da = pa.port or (443 if pa.scheme == "https" else 80)
     db = pb.port or (443 if pb.scheme == "https" else 80)
-    return (pa.scheme, (pa.hostname or "").lower(), da) == (
+    return (pa.scheme, canonical_host(pa.hostname) if pa.hostname else "", da) == (
         pb.scheme,
-        (pb.hostname or "").lower(),
+        canonical_host(pb.hostname) if pb.hostname else "",
         db,
     )
 
 
-_PARAM_RE = re.compile(r"[?&]([^=&]+)=")
-
-
 def extract_params(url: str) -> list[str]:
-    return _PARAM_RE.findall(urlsplit(url).query and "?" + urlsplit(url).query or "")
+    return list(dict.fromkeys(k for k, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True)))

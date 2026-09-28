@@ -11,3 +11,7 @@ report*.json
 report*.html
 report*.csv
 report*.sarif
+.hypothesis/
+coverage.xml
+test-results.xml
+.ruff_cache/

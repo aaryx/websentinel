@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+import re
 
 from websentinel.models import Finding, Severity, Confidence, Response
 
@@ -44,7 +45,7 @@ def robots_rules(body: str) -> dict[str, list[str]]:
 
 
 def analyze_security_txt(resp: Response) -> list[Finding]:
-    if resp.error or resp.status == 404:
+    if not resp.error and resp.status in (404, 410):
         return [Finding(
             id="SEC-TXT-MISSING", title="security.txt not found",
             category="Information Disclosure", severity=Severity.INFO,
@@ -59,6 +60,8 @@ def analyze_security_txt(resp: Response) -> list[Finding]:
 
 def parse_sitemap_urls(body: str, limit: int = 100) -> list[str]:
     urls: list[str] = []
+    if limit <= 0 or re.search(r"<!\s*(?:DOCTYPE|ENTITY)", body, re.I):
+        return urls
     try:
         root = ET.fromstring(body[:1_000_000])
     except ET.ParseError:

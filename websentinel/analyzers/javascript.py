@@ -3,11 +3,14 @@ sourcemap references, secret-like tokens (pattern-based, redacted)."""
 from __future__ import annotations
 
 import re
+from io import StringIO
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
 from websentinel.models import Finding, Severity, Confidence, Response
+from websentinel.analyzers.html import document_base
+from websentinel.utils.urls import resolve_url
 
 # ponytail: only high-precision token formats are flagged — entropy-only
 # detection produces noise, contrary to spec. Add formats by appending here.
@@ -32,10 +35,11 @@ def _redact(s: str) -> str:
 def script_urls(resp: Response, scope) -> list[str]:
     if resp.error or "html" not in resp.content_type.lower():
         return []
-    soup = BeautifulSoup(resp.body, "html.parser")
+    soup = BeautifulSoup(StringIO(resp.body), "html.parser")
     out = []
+    base = document_base(soup, resp.final_url)
     for t in soup.find_all("script", src=True):
-        full = urljoin(resp.final_url, t["src"])
+        full = resolve_url(base, t["src"])
         if scope.allows(full):
             out.append(full)
     return out
@@ -43,7 +47,7 @@ def script_urls(resp: Response, scope) -> list[str]:
 
 def analyze_javascript(url: str, body: str) -> list[Finding]:
     findings: list[Finding] = []
-    hit_kinds: dict[str, list[str]] = {}
+    hit_kinds: dict[str, set[str]] = {}
     for kind, pat in _SECRET_PATTERNS:
         for m in pat.finditer(body):
             hit_kinds.setdefault(kind, set()).add(_redact(m.group(0)))

@@ -20,7 +20,7 @@ class RateLimiter:
             now = time.monotonic()
             if now < self._next:
                 await asyncio.sleep(self._next - now)
-            self._next = max(now, self._next) + self.interval
+            self._next = time.monotonic() + self.interval
 
 
 def elapsed_ms(start: float) -> float:

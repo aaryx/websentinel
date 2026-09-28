@@ -5,6 +5,7 @@ import csv
 import io
 
 from websentinel.models import ScanResult
+from websentinel.utils.redaction import safe_report
 
 _FIELDS = [
     "id",
@@ -20,6 +21,7 @@ _FIELDS = [
     "evidence",
     "remediation",
     "affected_urls",
+    "scan_completion",
 ]
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -30,11 +32,12 @@ def _sanitize_cell(val: object) -> str:
     if val is None:
         return ""
     text = str(val)
-    if text and text.startswith(_FORMULA_PREFIXES):
+    if text and (text.startswith(_FORMULA_PREFIXES + ("\n",)) or text.lstrip().startswith(_FORMULA_PREFIXES)):
         return f"'{text}"
     return text
 
 
+@safe_report
 def render_csv(result: ScanResult) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -55,6 +58,7 @@ def render_csv(result: ScanResult) -> str:
                 _sanitize_cell(f.evidence),
                 _sanitize_cell(f.remediation),
                 _sanitize_cell(";".join(f.affected_urls)),
+                result.completion,
             ]
         )
     return buf.getvalue()

@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import math
+import re
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -48,6 +51,14 @@ class Config:
 
     def validate(self) -> None:
         """Validate config constraints and types."""
+        for name in ("timeout", "rate_limit", "concurrency", "max_pages", "max_depth",
+                     "max_redirects", "max_body_bytes", "retries", "max_requests"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"{name} must be a finite number")
+        for name in ("follow_redirects", "verify_tls"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be a boolean")
         if not isinstance(self.timeout, (int, float)) or self.timeout <= 0:
             raise ValueError(f"timeout must be positive number, got {self.timeout!r}")
         if not isinstance(self.concurrency, int) or self.concurrency < 1:
@@ -74,6 +85,21 @@ class Config:
             )
         if not isinstance(self.extra_headers, dict):
             raise ValueError(f"extra_headers must be a dictionary, got {type(self.extra_headers).__name__}")
+        if not isinstance(self.user_agent, str) or not self.user_agent:
+            raise ValueError("user_agent must be a nonempty string")
+        for name, value in {"User-Agent": self.user_agent, **self.extra_headers}.items():
+            if not isinstance(name, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name):
+                raise ValueError("Invalid HTTP header name")
+            if not isinstance(value, str) or any(ord(c) < 32 or ord(c) > 126 for c in value):
+                raise ValueError(f"Header {name!r} must contain printable ASCII only")
+        if self.proxy is not None:
+            try:
+                p = urlsplit(self.proxy)
+                valid = p.scheme in ("http", "https") and p.hostname and p.port != 0
+            except (ValueError, TypeError, AttributeError):
+                valid = False
+            if not valid:
+                raise ValueError("proxy must be an HTTP or HTTPS URL with a valid host and port")
 
     @classmethod
     def load(cls, path: str | None) -> "Config":
@@ -97,7 +123,7 @@ class Config:
                     loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
                 except yaml.YAMLError as e:
                     raise ValueError(f"Invalid YAML in config file {p}: {e}") from e
-                data = loaded or {}
+                data = {} if loaded is None else loaded
                 break
 
         if data is not None:
@@ -107,22 +133,27 @@ class Config:
             # Check for unknown keys at top level
             unknown = set(data.keys()) - _VALID_KEYS
             if unknown:
-                raise ValueError(f"Unknown configuration key(s): {', '.join(sorted(unknown))}")
+                raise ValueError(f"Unknown configuration key(s): {', '.join(sorted(map(str, unknown)))}")
 
-            flat = dict(data.get("scan", data))
+            if "scan" in data and not isinstance(data["scan"], dict):
+                raise ValueError("'scan' section must be a YAML mapping")
+            flat = {k: v for k, v in data.items() if k != "scan"}
+            flat.update(data.get("scan", {}))
             if isinstance(data.get("scan"), dict):
                 scan_unknown = set(data["scan"].keys()) - (_VALID_KEYS - {"scan"})
                 if scan_unknown:
                     raise ValueError(
-                        f"Unknown key(s) in 'scan' section: {', '.join(sorted(scan_unknown))}"
+                        f"Unknown key(s) in 'scan' section: {', '.join(sorted(map(str, scan_unknown)))}"
                     )
 
             for k, v in flat.items():
                 if hasattr(cfg, k):
                     setattr(cfg, k, v)
 
-            if isinstance(data.get("scope"), dict):
-                cfg.scope = data["scope"].get("mode", cfg.scope)
+            if isinstance(flat.get("scope"), dict):
+                if set(flat["scope"]) != {"mode"}:
+                    raise ValueError("scope mapping must contain only 'mode'")
+                cfg.scope = flat["scope"]["mode"]
             elif "scope" in flat:
                 cfg.scope = flat["scope"]
 

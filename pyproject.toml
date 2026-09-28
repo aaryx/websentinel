@@ -19,3 +19,22 @@ websentinel = "websentinel.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["websentinel*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-config --strict-markers"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["error"]
+markers = ["online: checks requiring external schema/advisory services"]
+
+[tool.coverage.run]
+branch = true
+source = ["websentinel"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

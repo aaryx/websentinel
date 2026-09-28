@@ -18,7 +18,7 @@ async def test_response_streaming_size_limit():
 
     transport = httpx.MockTransport(handler)
     cfg = Config(max_body_bytes=1024)
-    engine = HttpEngine(cfg)
+    engine = HttpEngine(cfg, allow_private=True)
     engine._client = httpx.AsyncClient(transport=transport)
 
     resp = await engine.fetch("http://test.local/large")
@@ -44,7 +44,7 @@ async def test_decompression_bomb_size_bounded():
 
     transport = httpx.MockTransport(handler)
     cfg = Config(max_body_bytes=2048)
-    engine = HttpEngine(cfg)
+    engine = HttpEngine(cfg, allow_private=True)
     engine._client = httpx.AsyncClient(transport=transport)
 
     resp = await engine.fetch("http://test.local/bomb")
@@ -67,7 +67,7 @@ async def test_request_budget_strict_under_concurrency():
     transport = httpx.MockTransport(handler)
     # Set hard budget of 5 with concurrency of 10
     cfg = Config(max_requests=5, concurrency=10, retries=0)
-    engine = HttpEngine(cfg)
+    engine = HttpEngine(cfg, allow_private=True)
     engine._client = httpx.AsyncClient(transport=transport)
 
     # Launch 20 concurrent requests
@@ -98,7 +98,7 @@ async def test_bounded_retries_resets_chain():
 
     transport = httpx.MockTransport(handler)
     cfg = Config(retries=2, timeout=2)
-    engine = HttpEngine(cfg)
+    engine = HttpEngine(cfg, allow_private=True)
     engine._client = httpx.AsyncClient(transport=transport)
 
     resp = await engine.fetch("http://test.local/retry")

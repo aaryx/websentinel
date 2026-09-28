@@ -53,6 +53,7 @@ def server():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_port}/"
     srv.shutdown()
+    srv.server_close()
 
 
 def _run(url, **kw):
@@ -94,7 +95,7 @@ def test_request_budget_enforced(server):
     target = normalize_target(server, allow_private=True)
     cfg = Config(timeout=3, max_requests=2)
     r = asyncio.run(scan(target, cfg, crawl=True, modules={"headers"}))
-    assert r.requests_made <= 4  # retries of options+root+probes bounded
+    assert r.requests_made <= 2  # every HTTP hop/retry shares the hard budget
 
 
 def test_injection_canary_enabled(server):

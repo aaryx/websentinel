@@ -6,15 +6,21 @@ from dataclasses import asdict
 
 from websentinel import __version__
 from websentinel.models import ScanResult
+from websentinel.utils.urls import sanitize_url_for_logging
+from websentinel.utils.redaction import safe_report
 
 
+@safe_report
 def to_dict(result: ScanResult) -> dict:
     t = result.target
     root = result.responses[0] if result.responses else None
     return {
         "tool": {"name": "WebSentinel", "version": __version__},
-        "target": asdict(t),
+        "target": {**asdict(t), "original": sanitize_url_for_logging(t.original),
+                   "url": sanitize_url_for_logging(t.url)},
         "scan": {
+            "completion": result.completion,
+            "checks": result.check_status,
             "started": result.started,
             "duration_s": round(result.duration_s, 3),
             "requests_made": result.requests_made,
@@ -23,6 +29,7 @@ def to_dict(result: ScanResult) -> dict:
                 "content_type": root.content_type,
                 "http_version": root.http_version,
                 "redirect_chain": root.redirect_chain,
+                "truncated": root.truncated,
             } if root and not root.error else None),
             "errors": result.errors,
             "warnings": result.warnings,

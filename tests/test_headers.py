@@ -44,5 +44,7 @@ def test_all_present_no_missing_findings():
         "permissions-policy", "cross-origin-opener-policy",
         "cross-origin-resource-policy", "cross-origin-embedder-policy")}
     hdrs["content-security-policy"] = "default-src 'self'"
+    hdrs.update({"strict-transport-security": "max-age=31536000",
+                 "x-frame-options": "DENY", "x-content-type-options": "nosniff"})
     f = analyze_headers(make_response(headers=hdrs), is_https=True)
     assert not f

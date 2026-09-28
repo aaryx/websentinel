@@ -30,11 +30,11 @@ def inspect_tls(
     if target.scheme != "https":
         return findings, info
 
-    from websentinel.utils.urls import URLValidationError, validate_host_safety
+    from websentinel.utils.urls import URLValidationError, resolve_connection_address
 
     try:
-        validate_host_safety(target.host, allow_private=target.allow_private)
-    except URLValidationError as e:
+        address = resolve_connection_address(target.host, allow_private=target.allow_private)
+    except (URLValidationError, OSError) as e:
         info["error"] = str(e)
         return findings, info
 
@@ -44,8 +44,8 @@ def inspect_tls(
         ctx.verify_mode = ssl.CERT_NONE
 
     try:
-        with socket.create_connection((target.host, target.port), timeout=timeout) as sock, \
-                ctx.wrap_socket(sock, server_hostname=target.host if verify_tls else None) as ssock:
+        with socket.create_connection((address, target.port), timeout=timeout) as sock, \
+                ctx.wrap_socket(sock, server_hostname=target.host) as ssock:
             info["tls_version"] = ssock.version()
             cert = ssock.getpeercert()
     except ssl.SSLCertVerificationError as e:

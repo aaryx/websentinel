@@ -1,4 +1,26 @@
 from websentinel.models import Response
+import ipaddress
+import socket
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def offline_dns(monkeypatch, request):
+    """Ordinary tests must not depend on public DNS or network availability."""
+    if request.node.get_closest_marker("online"):
+        return
+    original = socket.getaddrinfo
+    def local_only(host, *args, **kwargs):
+        text = host.decode() if isinstance(host, bytes) else str(host)
+        try:
+            loopback = ipaddress.ip_address(text).is_loopback
+        except ValueError:
+            loopback = text == "localhost"
+        if loopback:
+            return original(host, *args, **kwargs)
+        raise socket.gaierror("public DNS disabled by offline test fixture")
+    monkeypatch.setattr(socket, "getaddrinfo", local_only)
 
 
 def make_response(url="https://example.com/", status=200, headers=None,

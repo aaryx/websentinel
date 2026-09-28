@@ -20,12 +20,16 @@ def correlate(findings: list[Finding], is_https: bool) -> list[Finding]:
 
     if is_https and "HTML-INSECURE-FORM" in ids:
         cookie_ids = {"CK-NO-SECURE", "CK-NO-HTTPONLY"}
+        insecure_urls = {f.url for f in findings if f.id == "HTML-INSECURE-FORM"}
+        raised = False
         for f in findings:
-            if f.id in cookie_ids:
+            if f.id in cookie_ids and f.url in insecure_urls:
                 f.severity = bump(f.severity)
-        notes.append(
-            "Login-form weaknesses combined with cookie attribute gaps raised "
-            "affected cookie findings by one severity level (capped at HIGH).")
+                raised = True
+        if raised:
+            notes.append(
+                "Login-form weaknesses combined with cookie attribute gaps raised "
+                "affected cookie findings by one severity level (capped at HIGH).")
 
     if not is_https and "CK-NO-HTTPONLY" in ids:
         for f in findings:

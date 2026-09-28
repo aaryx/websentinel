@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import io
 from pathlib import Path
 
 from rich.console import Console
@@ -23,7 +24,9 @@ from websentinel.config import Config
 from websentinel.models import Severity
 from websentinel.scanner import CHECKS, scan
 from websentinel.utils.logging import setup_logging
-from websentinel.utils.urls import URLValidationError, normalize_target
+from websentinel.utils.urls import URLValidationError, normalize_target, sanitize_url_for_logging
+from websentinel.utils.redaction import Redactor, query_secrets, sensitive_values
+from websentinel.reporting.files import write_report
 
 EXIT_OK, EXIT_FINDINGS, EXIT_ARGS, EXIT_NETWORK, EXIT_INTERNAL = 0, 1, 2, 3, 4
 
@@ -178,6 +181,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
     s.add_argument("-q", "--quiet", action="store_true", help="Suppress non-error output")
+    s.add_argument("--fail-on-incomplete", action="store_true",
+                   help="Return exit code 3 if any selected check has incomplete coverage")
 
     sub.add_parser("checks", help="List available checks")
     sub.add_parser("version", help="Show version")
@@ -208,8 +213,10 @@ def _apply_filters(result, a: argparse.Namespace) -> None:
 
 
 def _selected_modules(a: argparse.Namespace) -> set[str] | None:
-    if a.checks:
+    if a.checks is not None:
         requested = {c.strip() for c in a.checks.split(",") if c.strip()}
+        if not requested:
+            raise ValueError("--checks must contain at least one check ID")
         known = {c for c, _ in CHECKS}
         unknown = requested - known
         if unknown:
@@ -232,7 +239,7 @@ def _cmd_scan(a: argparse.Namespace) -> int:
 
     # Validate target early
     try:
-        target = normalize_target(a.url, allow_private=a.allow_private)
+        target = normalize_target(a.url, allow_private=a.allow_private, resolve_dns=False)
     except URLValidationError as e:
         print(f"error: {e}", file=sys.stderr)
         return EXIT_ARGS
@@ -240,7 +247,7 @@ def _cmd_scan(a: argparse.Namespace) -> int:
     # Load and validate configuration
     try:
         cfg = Config.load(a.config)
-    except (FileNotFoundError, ValueError) as e:
+    except (OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return EXIT_ARGS
 
@@ -285,7 +292,7 @@ def _cmd_scan(a: argparse.Namespace) -> int:
 
     for h in a.header:
         if ":" not in h:
-            print(f"error: malformed --header {h!r}; expected 'Name: value'", file=sys.stderr)
+            print("error: malformed --header; expected 'Name: value'", file=sys.stderr)
             return EXIT_ARGS
         k, v = h.split(":", 1)
         cfg.extra_headers[k.strip()] = v.strip()
@@ -296,9 +303,15 @@ def _cmd_scan(a: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return EXIT_ARGS
 
+    secrets = list(cfg.extra_headers.values()) + query_secrets(a.url) + sensitive_values(a.url)
+    if cfg.proxy:
+        secrets.extend(sensitive_values(cfg.proxy))
+    redactor = Redactor(secrets)
+    setup_logging(a.verbose, a.quiet, secrets)
+
     # Resolve output format
     fmt = a.format or cfg.output_format
-    if a.output and fmt == "terminal":
+    if a.output and fmt == "terminal" and a.format is None:
         inferred = {
             ".json": "json",
             ".html": "html",
@@ -319,8 +332,10 @@ def _cmd_scan(a: argparse.Namespace) -> int:
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             transient=True,
+            console=Console(stderr=True, file=io.StringIO() if a.quiet or fmt != "terminal" or not sys.stderr.isatty() else None),
+            disable=a.quiet or fmt != "terminal" or not sys.stderr.isatty(),
         ) as prog:
-            prog.add_task(f"Scanning {target.url} ...", total=None)
+            prog.add_task(f"Scanning {sanitize_url_for_logging(target.url)} ...", total=None)
             result = asyncio.run(
                 scan(target, cfg, modules=mods, crawl=crawl_enabled)
             )
@@ -328,13 +343,13 @@ def _cmd_scan(a: argparse.Namespace) -> int:
         print("\nInterrupted by user.", file=sys.stderr)
         return EXIT_NETWORK
     except Exception as e:
-        print(f"internal error: {e}", file=sys.stderr)
+        print(f"internal error: {redactor.text(str(e))}", file=sys.stderr)
         return EXIT_INTERNAL
 
-    if result.errors and not result.responses:
-        print(f"error: {result.errors[0]}", file=sys.stderr)
-        return EXIT_NETWORK
-
+    failed = bool(result.errors)
+    result.redaction_values.extend(secrets)
+    incomplete = result.completion != "complete"
+    high = any(f.severity in (Severity.HIGH, Severity.CRITICAL) for f in result.findings)
     _apply_filters(result, a)
 
     rendered = None
@@ -359,36 +374,40 @@ def _cmd_scan(a: argparse.Namespace) -> int:
         try:
             a.output.parent.mkdir(parents=True, exist_ok=True)
             if rendered is not None:
-                a.output.write_text(rendered, encoding="utf-8")
-                print(f"Report written to {a.output}")
+                write_report(a.output, rendered)
+                if not a.quiet:
+                    print(f"Report written to {a.output}", file=sys.stderr)
             else:
                 # Terminal format written to file
-                c = Console(record=True, width=100)
+                c = Console(record=True, width=100, file=io.StringIO())
                 from websentinel.reporting.terminal import render_console
 
                 render_console(result, console=c)
-                a.output.write_text(c.export_text(), encoding="utf-8")
-                print(f"Report written to {a.output}")
+                write_report(a.output, c.export_text())
+                if not a.quiet:
+                    print(f"Report written to {a.output}", file=sys.stderr)
         except OSError as e:
             print(f"error writing output file {a.output}: {e}", file=sys.stderr)
             return EXIT_ARGS
 
-        if fmt == "terminal":
+        if fmt == "terminal" and not a.quiet:
             from websentinel.reporting.terminal import render_console
 
             render_console(result)
     elif rendered is not None:
         print(rendered)
-    else:
+    elif not a.quiet:
         from websentinel.reporting.terminal import render_console
 
         render_console(result)
 
-    summary = result.summary()
-    high = summary[Severity.HIGH.value] + summary[Severity.CRITICAL.value]
-    if not result.findings or high == 0:
-        return EXIT_OK
-    return EXIT_FINDINGS
+    if failed:
+        print(f"error: {redactor.text(result.errors[0])}", file=sys.stderr)
+        return EXIT_NETWORK
+    if a.fail_on_incomplete and incomplete:
+        print("error: selected checks have incomplete coverage", file=sys.stderr)
+        return EXIT_NETWORK
+    return EXIT_FINDINGS if high else EXIT_OK
 
 
 def main(argv: list[str] | None = None) -> int:

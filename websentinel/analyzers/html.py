@@ -3,26 +3,35 @@ Never submits forms or injects payloads."""
 from __future__ import annotations
 
 from urllib.parse import urljoin, urlsplit
+from io import StringIO
 
 from bs4 import BeautifulSoup
 
 from websentinel.models import Finding, Severity, Confidence, Response
+from websentinel.utils.urls import resolve_url
+
+
+def document_base(soup, url: str) -> str:
+    base = soup.find("base", href=True)
+    return (resolve_url(url, base["href"]) if base else "") or url
 
 
 def analyze_html(resp: Response, page_is_https: bool) -> list[Finding]:
     if resp.error or "html" not in resp.content_type.lower():
         return []
-    soup = BeautifulSoup(resp.body, "html.parser")
+    soup = BeautifulSoup(StringIO(resp.body), "html.parser")
     url = resp.final_url
+    base = document_base(soup, url)
     findings: list[Finding] = []
 
     # --- forms ---
     for form in soup.find_all("form"):
-        action = form.get("action") or url
-        action = urljoin(url, action)
+        action = resolve_url(base, form["action"]) if form.get("action") else url
+        if not action:
+            continue
         method = (form.get("method") or "get").lower()
         inputs = form.find_all("input")
-        has_password = any(i.get("type") == "password" for i in inputs)
+        has_password = any(str(i.get("type", "")).lower() == "password" for i in inputs)
         names = {str(i.get("name", "")).lower() for i in inputs}
         if method == "post" and not any(
                 "csrf" in n or "token" in n for n in names):
@@ -72,9 +81,13 @@ def analyze_html(resp: Response, page_is_https: bool) -> list[Finding]:
         for tag, attr in (("script", "src"), ("img", "src"),
                           ("link", "href"), ("iframe", "src")):
             for t in soup.find_all(tag):
-                v = t.get(attr, "")
+                if not t.get(attr):
+                    continue
+                if tag == "link" and not set(t.get("rel", [])) & {"stylesheet", "preload", "modulepreload", "icon"}:
+                    continue
+                v = resolve_url(base, t.get(attr, ""))
                 if v.startswith("http://"):
-                    mixed.append(urljoin(url, v))
+                    mixed.append(v)
         if mixed:
             findings.append(Finding(
                 id="HTML-MIXED-CONTENT",
@@ -95,7 +108,7 @@ def analyze_html(resp: Response, page_is_https: bool) -> list[Finding]:
             v = t.get(attr, "")
             if not v:
                 continue
-            full = urljoin(url, v)
+            full = resolve_url(base, v)
             th = urlsplit(full).hostname or ""
             if th and th != host and not th.endswith("." + host):
                 externals.add(th)
@@ -117,9 +130,10 @@ def analyze_html(resp: Response, page_is_https: bool) -> list[Finding]:
 def extract_links(resp: Response) -> list[str]:
     if resp.error or "html" not in resp.content_type.lower():
         return []
-    soup = BeautifulSoup(resp.body, "html.parser")
-    links = [urljoin(resp.final_url, a["href"])
-             for a in soup.find_all("a", href=True)]
+    soup = BeautifulSoup(StringIO(resp.body), "html.parser")
+    base = document_base(soup, resp.final_url)
+    links = [full for a in soup.find_all("a", href=True)
+             if (full := resolve_url(base, a["href"]))]
     return links
 
 

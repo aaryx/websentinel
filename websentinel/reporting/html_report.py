@@ -5,6 +5,7 @@ import html
 
 from websentinel import __version__
 from websentinel.models import ScanResult, Severity
+from websentinel.utils.redaction import safe_report
 
 _ORDER = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM,
           Severity.LOW, Severity.INFO]
@@ -29,6 +30,7 @@ def _e(s: object) -> str:
     return html.escape(str(s)) if s else ""
 
 
+@safe_report
 def render_html(result: ScanResult) -> str:
     t = result.target
     summary = result.summary()
@@ -44,6 +46,7 @@ vulnerabilities unless stated.</p>
 <tr><th>Scan started</th><td>{_e(result.started)}</td></tr>
 <tr><th>Duration</th><td>{result.duration_s:.2f}s</td></tr>
 <tr><th>Requests</th><td>{result.requests_made}</td></tr>
+<tr><th>Completion</th><td>{_e(result.completion)}</td></tr>
 <tr><th>Pages</th><td>{len(result.pages)}</td></tr>
 <tr><th>Technologies</th><td>{_e(", ".join(result.technologies)) or "—"}</td></tr>
 </table>
@@ -52,7 +55,10 @@ vulnerabilities unless stated.</p>
         parts.append(
             f'<tr><td><span class="sev" style="background:{_COLORS[sev.value]}">'
             f'{sev.value}</span></td><td>{summary[sev.value]}</td></tr>')
-    parts.append("</table><h2>Findings</h2>")
+    parts.append("</table><h2>Check execution</h2><ul>")
+    parts.extend(f"<li>{_e(name)}: {_e(state['status'])} — {_e('; '.join(state['reasons']))}</li>"
+                 for name, state in result.check_status.items())
+    parts.append("</ul><h2>Findings</h2>")
 
     for sev in _ORDER:
         for f in (x for x in result.findings if x.severity == sev):
@@ -76,6 +82,10 @@ vulnerabilities unless stated.</p>
     if result.errors:
         parts.append("<h2>Errors</h2><ul>")
         parts.extend(f"<li>{_e(e)}</li>" for e in result.errors)
+        parts.append("</ul>")
+    if result.warnings:
+        parts.append("<h2>Warnings</h2><ul>")
+        parts.extend(f"<li>{_e(w)}</li>" for w in result.warnings)
         parts.append("</ul>")
     parts.append("</body></html>")
     return "\n".join(parts)

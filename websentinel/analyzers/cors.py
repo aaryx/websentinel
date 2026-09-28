@@ -9,7 +9,7 @@ def analyze_cors(resp: Response) -> list[Finding]:
     acao = h.get("access-control-allow-origin")
     if not acao:
         return []
-    acac = h.get("access-control-allow-credentials", "").lower() == "true"
+    acac = h.get("access-control-allow-credentials", "").strip() == "true"
     findings = []
     trimmed_acao = acao.strip()
 
@@ -41,7 +41,7 @@ def analyze_cors(resp: Response) -> list[Finding]:
                 owasp="A05:2021 Security Misconfiguration",
             )
         )
-    elif trimmed_acao.lower() == "null":
+    elif trimmed_acao == "null":
         findings.append(
             Finding(
                 id="CORS-NULL-ORIGIN",
